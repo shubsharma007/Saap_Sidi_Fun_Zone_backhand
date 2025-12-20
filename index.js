@@ -14,12 +14,13 @@ const io = new Server(server, {
 
 /**
  * In-memory room storage
+ * room.players = [{ id, name }]
  */
 const rooms = {};
 
 /**
  * Send updated room list to ALL clients
- * (creator apna room nahi dekhega)
+ * (creator apna room list me nahi dekhega)
  */
 function emitRoomList() {
   io.sockets.sockets.forEach((sock) => {
@@ -48,12 +49,15 @@ app.get("/", (req, res) => {
  * SOCKET CONNECTION
  */
 io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
+  console.log("🔗 User connected:", socket.id);
 
-  /* ---------------- CREATE ROOM ---------------- */
-  socket.on("create_room", ({ maxPlayers, roomName, password }) => {
+  /* ================= CREATE ROOM ================= */
+  socket.on("create_room", ({ maxPlayers, roomName, password, playerName }) => {
 
-    if (![2, 3, 4].includes(maxPlayers)) return;
+    if (![2, 3, 4].includes(maxPlayers)) {
+      socket.emit("error_message", "Invalid player size");
+      return;
+    }
 
     const roomId = Math.random()
       .toString(36)
@@ -64,32 +68,45 @@ io.on("connection", (socket) => {
       roomId,
       roomName: roomName?.trim() || "Room",
       creatorId: socket.id,
-      players: [socket.id],
       maxPlayers,
       password: password?.length ? password : null,
-      started: false
+      started: false,
+      players: [
+        {
+          id: socket.id,
+          name: playerName || "Player"
+        }
+      ]
     };
 
     socket.join(roomId);
 
-    console.log(`Room created: ${roomId} (${rooms[roomId].roomName})`);
+    console.log(`🟢 Room created: ${roomId} (${rooms[roomId].roomName})`);
 
     socket.emit("room_created", {
       roomId,
-      roomName: rooms[roomId].roomName
+      roomName: rooms[roomId].roomName,
+      maxPlayers
+    });
+
+    // send initial player list
+    io.to(roomId).emit("player_list_update", {
+      players: rooms[roomId].players,
+      maxPlayers: rooms[roomId].maxPlayers
     });
 
     emitRoomList();
   });
 
-  /* ---------------- GET ROOMS ---------------- */
+  /* ================= GET ROOMS ================= */
   socket.on("get_rooms", () => {
     emitRoomList();
   });
 
-  /* ---------------- JOIN ROOM ---------------- */
-  socket.on("join_room", ({ roomId, password }) => {
+  /* ================= JOIN ROOM ================= */
+  socket.on("join_room", ({ roomId, password, playerName }) => {
     const room = rooms[roomId];
+
     if (!room) {
       socket.emit("join_failed", "Room not found");
       return;
@@ -106,29 +123,41 @@ io.on("connection", (socket) => {
     }
 
     if (room.players.length >= room.maxPlayers) {
-      socket.emit("join_failed", "Room full");
+      socket.emit("join_failed", "Room is full");
       return;
     }
 
-    room.players.push(socket.id);
+    room.players.push({
+      id: socket.id,
+      name: playerName || "Player"
+    });
+
     socket.join(roomId);
 
-    console.log(`User ${socket.id} joined room ${roomId}`);
+    console.log(`👤 ${playerName} joined room ${roomId}`);
 
-    io.to(roomId).emit("player_joined", {
-      currentPlayers: room.players.length,
-      roomName: room.roomName
+    io.to(roomId).emit("player_list_update", {
+      players: room.players,
+      maxPlayers: room.maxPlayers
     });
 
     emitRoomList();
   });
 
-  /* ---------------- START GAME ---------------- */
+  /* ================= START GAME ================= */
   socket.on("start_game", ({ roomId }) => {
     const room = rooms[roomId];
     if (!room) return;
 
     if (room.creatorId !== socket.id) return;
+
+    // ❌ Single player not allowed
+    if (room.players.length < 2) {
+      socket.emit("error_message", "At least 2 players required");
+      return;
+    }
+
+    console.log(`🎮 Game started in room ${roomId}`);
 
     room.started = true;
 
@@ -139,13 +168,13 @@ io.on("connection", (socket) => {
     });
   });
 
-  /* ---------------- CREATOR LEAVES ROOM ---------------- */
+  /* ================= CREATOR LEAVES ROOM ================= */
   socket.on("leave_room", ({ roomId }) => {
     const room = rooms[roomId];
     if (!room) return;
 
     if (room.creatorId === socket.id) {
-      console.log("Room destroyed by creator:", roomId);
+      console.log("🔴 Room destroyed by creator:", roomId);
 
       io.to(roomId).emit("room_destroyed", {
         reason: "creator_left"
@@ -156,9 +185,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  /* ---------------- DISCONNECT ---------------- */
+  /* ================= DISCONNECT ================= */
   socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
+    console.log("❌ User disconnected:", socket.id);
 
     let changed = false;
 
@@ -167,7 +196,7 @@ io.on("connection", (socket) => {
 
       // 🔴 Creator disconnect → destroy room
       if (room.creatorId === socket.id) {
-        console.log("Room destroyed (creator disconnect):", roomId);
+        console.log("🔴 Room destroyed (creator disconnect):", roomId);
 
         io.to(roomId).emit("room_destroyed", {
           reason: "creator_disconnect"
@@ -180,12 +209,12 @@ io.on("connection", (socket) => {
 
       // 🔹 Normal player disconnect
       const before = room.players.length;
-      room.players = room.players.filter(p => p !== socket.id);
+      room.players = room.players.filter(p => p.id !== socket.id);
 
       if (room.players.length !== before) {
-        io.to(roomId).emit("player_left", {
-          currentPlayers: room.players.length,
-          roomName: room.roomName
+        io.to(roomId).emit("player_list_update", {
+          players: room.players,
+          maxPlayers: room.maxPlayers
         });
         changed = true;
       }
