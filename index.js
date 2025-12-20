@@ -13,12 +13,12 @@ const io = new Server(server, {
 });
 
 /**
- * In-memory room storage
+ * Room storage (in-memory)
  */
 const rooms = {};
 
 /**
- * Test route
+ * Health check
  */
 app.get("/", (req, res) => {
   res.send("✅ Saap Sidi Socket Server Running");
@@ -32,9 +32,14 @@ io.on("connection", (socket) => {
 
   /**
    * CREATE ROOM
-   * maxPlayers = 2 | 3 | 4
+   * payload:
+   * {
+   *   maxPlayers: 2|3|4,
+   *   roomName: String,
+   *   password: String | null
+   * }
    */
-  socket.on("create_room", ({ maxPlayers, password }) => {
+  socket.on("create_room", ({ maxPlayers, roomName, password }) => {
 
     if (![2, 3, 4].includes(maxPlayers)) {
       socket.emit("error_message", "Invalid player size");
@@ -47,20 +52,22 @@ io.on("connection", (socket) => {
       .toUpperCase();
 
     rooms[roomId] = {
+      roomId,
+      roomName: roomName || "Room",
       creatorId: socket.id,
       players: [socket.id],
-      maxPlayers: maxPlayers,
+      maxPlayers,
       password: password || null,
       started: false
     };
 
     socket.join(roomId);
 
-    console.log(`Room ${roomId} created by ${socket.id}`);
+    console.log(`Room created: ${roomId} (${roomName})`);
 
     socket.emit("room_created", {
       roomId,
-      maxPlayers
+      roomName
     });
   });
 
@@ -68,11 +75,12 @@ io.on("connection", (socket) => {
    * GET ROOM LIST
    */
   socket.on("get_rooms", () => {
-    const roomList = Object.keys(rooms).map((roomId) => ({
-      roomId,
-      currentPlayers: rooms[roomId].players.length,
-      maxPlayers: rooms[roomId].maxPlayers,
-      hasPassword: rooms[roomId].password !== null
+    const roomList = Object.values(rooms).map(room => ({
+      roomId: room.roomId,
+      roomName: room.roomName,
+      currentPlayers: room.players.length,
+      maxPlayers: room.maxPlayers,
+      hasPassword: room.password !== null
     }));
 
     socket.emit("room_list", roomList);
@@ -80,6 +88,11 @@ io.on("connection", (socket) => {
 
   /**
    * JOIN ROOM
+   * payload:
+   * {
+   *   roomId: String,
+   *   password: String | null
+   * }
    */
   socket.on("join_room", ({ roomId, password }) => {
     const room = rooms[roomId];
@@ -106,13 +119,12 @@ io.on("connection", (socket) => {
 
     io.to(roomId).emit("player_joined", {
       currentPlayers: room.players.length,
-      maxPlayers: room.maxPlayers,
-      creatorId: room.creatorId
+      maxPlayers: room.maxPlayers
     });
   });
 
   /**
-   * START GAME (ONLY CREATOR)
+   * START GAME (only creator)
    */
   socket.on("start_game", ({ roomId }) => {
     const room = rooms[roomId];
@@ -145,13 +157,12 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
 
-    // Remove user from any room
     for (const roomId in rooms) {
       const room = rooms[roomId];
       room.players = room.players.filter(id => id !== socket.id);
 
       if (room.players.length === 0) {
-        delete rooms[roomId]; // delete empty room
+        delete rooms[roomId];
       } else {
         io.to(roomId).emit("player_left", {
           currentPlayers: room.players.length
