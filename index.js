@@ -13,7 +13,7 @@ const io = new Server(server, {
 });
 
 /**
- * Room storage (in-memory)
+ * In-memory room storage
  */
 const rooms = {};
 
@@ -34,9 +34,9 @@ io.on("connection", (socket) => {
    * CREATE ROOM
    * payload:
    * {
-   *   maxPlayers: 2|3|4,
+   *   maxPlayers: 2 | 3 | 4,
    *   roomName: String,
-   *   password: String | null
+   *   password: String | ""
    * }
    */
   socket.on("create_room", ({ maxPlayers, roomName, password }) => {
@@ -53,31 +53,32 @@ io.on("connection", (socket) => {
 
     rooms[roomId] = {
       roomId,
-      roomName: roomName || "Room",
+      roomName: roomName && roomName.trim().length > 0 ? roomName : "Room",
       creatorId: socket.id,
       players: [socket.id],
       maxPlayers,
-      password: password || null,
+      password: password && password.length > 0 ? password : null,
       started: false
     };
 
     socket.join(roomId);
 
-    console.log(`Room created: ${roomId} (${roomName})`);
+    console.log(`Room created: ${roomId} (${rooms[roomId].roomName})`);
 
     socket.emit("room_created", {
       roomId,
-      roomName
+      roomName: rooms[roomId].roomName
     });
   });
 
   /**
    * GET ROOM LIST
+   * Always send roomName (IMPORTANT)
    */
   socket.on("get_rooms", () => {
     const roomList = Object.values(rooms).map(room => ({
       roomId: room.roomId,
-      roomName: room.roomName,
+      roomName: room.roomName || "Room",
       currentPlayers: room.players.length,
       maxPlayers: room.maxPlayers,
       hasPassword: room.password !== null
@@ -91,7 +92,7 @@ io.on("connection", (socket) => {
    * payload:
    * {
    *   roomId: String,
-   *   password: String | null
+   *   password: String | ""
    * }
    */
   socket.on("join_room", ({ roomId, password }) => {
@@ -119,7 +120,8 @@ io.on("connection", (socket) => {
 
     io.to(roomId).emit("player_joined", {
       currentPlayers: room.players.length,
-      maxPlayers: room.maxPlayers
+      maxPlayers: room.maxPlayers,
+      roomName: room.roomName
     });
   });
 
@@ -128,7 +130,6 @@ io.on("connection", (socket) => {
    */
   socket.on("start_game", ({ roomId }) => {
     const room = rooms[roomId];
-
     if (!room) return;
 
     if (room.creatorId !== socket.id) {
@@ -147,6 +148,7 @@ io.on("connection", (socket) => {
 
     io.to(roomId).emit("game_started", {
       roomId,
+      roomName: room.roomName,
       players: room.players
     });
   });
@@ -165,7 +167,8 @@ io.on("connection", (socket) => {
         delete rooms[roomId];
       } else {
         io.to(roomId).emit("player_left", {
-          currentPlayers: room.players.length
+          currentPlayers: room.players.length,
+          roomName: room.roomName
         });
       }
     }
