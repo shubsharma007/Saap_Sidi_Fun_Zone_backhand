@@ -18,6 +18,21 @@ const io = new Server(server, {
 const rooms = {};
 
 /**
+ * Utility: Send updated room list to all clients
+ */
+function emitRoomList() {
+  const roomList = Object.values(rooms).map(room => ({
+    roomId: room.roomId,
+    roomName: room.roomName || "Room",
+    currentPlayers: room.players.length,
+    maxPlayers: room.maxPlayers,
+    hasPassword: room.password !== null
+  }));
+
+  io.emit("room_list", roomList);
+}
+
+/**
  * Health check
  */
 app.get("/", (req, res) => {
@@ -65,26 +80,21 @@ io.on("connection", (socket) => {
 
     console.log(`Room created: ${roomId} (${rooms[roomId].roomName})`);
 
+    // Notify creator
     socket.emit("room_created", {
       roomId,
       roomName: rooms[roomId].roomName
     });
+
+    // 🔥 Notify ALL users (live update)
+    emitRoomList();
   });
 
   /**
-   * GET ROOM LIST
-   * Always send roomName (IMPORTANT)
+   * GET ROOM LIST (manual fetch)
    */
   socket.on("get_rooms", () => {
-    const roomList = Object.values(rooms).map(room => ({
-      roomId: room.roomId,
-      roomName: room.roomName || "Room",
-      currentPlayers: room.players.length,
-      maxPlayers: room.maxPlayers,
-      hasPassword: room.password !== null
-    }));
-
-    socket.emit("room_list", roomList);
+    emitRoomList();
   });
 
   /**
@@ -118,11 +128,15 @@ io.on("connection", (socket) => {
 
     console.log(`User ${socket.id} joined room ${roomId}`);
 
+    // Notify players in room
     io.to(roomId).emit("player_joined", {
       currentPlayers: room.players.length,
       maxPlayers: room.maxPlayers,
       roomName: room.roomName
     });
+
+    // 🔥 Update room list for everyone
+    emitRoomList();
   });
 
   /**
@@ -159,18 +173,32 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
 
+    let changed = false;
+
     for (const roomId in rooms) {
       const room = rooms[roomId];
+      const before = room.players.length;
+
       room.players = room.players.filter(id => id !== socket.id);
+
+      if (room.players.length !== before) {
+        changed = true;
+      }
 
       if (room.players.length === 0) {
         delete rooms[roomId];
+        changed = true;
       } else {
         io.to(roomId).emit("player_left", {
           currentPlayers: room.players.length,
           roomName: room.roomName
         });
       }
+    }
+
+    // 🔥 Update room list if anything changed
+    if (changed) {
+      emitRoomList();
     }
   });
 });
