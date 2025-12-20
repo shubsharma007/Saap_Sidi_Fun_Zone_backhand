@@ -18,18 +18,23 @@ const io = new Server(server, {
 const rooms = {};
 
 /**
- * Utility: Send updated room list to all clients
+ * Send updated room list to ALL clients
+ * (creator apna room nahi dekhega)
  */
 function emitRoomList() {
-  const roomList = Object.values(rooms).map(room => ({
-    roomId: room.roomId,
-    roomName: room.roomName || "Room",
-    currentPlayers: room.players.length,
-    maxPlayers: room.maxPlayers,
-    hasPassword: room.password !== null
-  }));
+  io.sockets.sockets.forEach((sock) => {
+    const list = Object.values(rooms)
+      .filter(r => r.creatorId !== sock.id)
+      .map(room => ({
+        roomId: room.roomId,
+        roomName: room.roomName,
+        currentPlayers: room.players.length,
+        maxPlayers: room.maxPlayers,
+        hasPassword: room.password !== null
+      }));
 
-  io.emit("room_list", roomList);
+    sock.emit("room_list", list);
+  });
 }
 
 /**
@@ -45,21 +50,10 @@ app.get("/", (req, res) => {
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  /**
-   * CREATE ROOM
-   * payload:
-   * {
-   *   maxPlayers: 2 | 3 | 4,
-   *   roomName: String,
-   *   password: String | ""
-   * }
-   */
+  /* ---------------- CREATE ROOM ---------------- */
   socket.on("create_room", ({ maxPlayers, roomName, password }) => {
 
-    if (![2, 3, 4].includes(maxPlayers)) {
-      socket.emit("error_message", "Invalid player size");
-      return;
-    }
+    if (![2, 3, 4].includes(maxPlayers)) return;
 
     const roomId = Math.random()
       .toString(36)
@@ -68,11 +62,11 @@ io.on("connection", (socket) => {
 
     rooms[roomId] = {
       roomId,
-      roomName: roomName && roomName.trim().length > 0 ? roomName : "Room",
+      roomName: roomName?.trim() || "Room",
       creatorId: socket.id,
       players: [socket.id],
       maxPlayers,
-      password: password && password.length > 0 ? password : null,
+      password: password?.length ? password : null,
       started: false
     };
 
@@ -80,36 +74,29 @@ io.on("connection", (socket) => {
 
     console.log(`Room created: ${roomId} (${rooms[roomId].roomName})`);
 
-    // Notify creator
     socket.emit("room_created", {
       roomId,
       roomName: rooms[roomId].roomName
     });
 
-    // 🔥 Notify ALL users (live update)
     emitRoomList();
   });
 
-  /**
-   * GET ROOM LIST (manual fetch)
-   */
+  /* ---------------- GET ROOMS ---------------- */
   socket.on("get_rooms", () => {
     emitRoomList();
   });
 
-  /**
-   * JOIN ROOM
-   * payload:
-   * {
-   *   roomId: String,
-   *   password: String | ""
-   * }
-   */
+  /* ---------------- JOIN ROOM ---------------- */
   socket.on("join_room", ({ roomId, password }) => {
     const room = rooms[roomId];
-
     if (!room) {
       socket.emit("join_failed", "Room not found");
+      return;
+    }
+
+    if (room.creatorId === socket.id) {
+      socket.emit("join_failed", "Creator cannot join own room");
       return;
     }
 
@@ -119,7 +106,7 @@ io.on("connection", (socket) => {
     }
 
     if (room.players.length >= room.maxPlayers) {
-      socket.emit("join_failed", "Room is full");
+      socket.emit("join_failed", "Room full");
       return;
     }
 
@@ -128,37 +115,22 @@ io.on("connection", (socket) => {
 
     console.log(`User ${socket.id} joined room ${roomId}`);
 
-    // Notify players in room
     io.to(roomId).emit("player_joined", {
       currentPlayers: room.players.length,
-      maxPlayers: room.maxPlayers,
       roomName: room.roomName
     });
 
-    // 🔥 Update room list for everyone
     emitRoomList();
   });
 
-  /**
-   * START GAME (only creator)
-   */
+  /* ---------------- START GAME ---------------- */
   socket.on("start_game", ({ roomId }) => {
     const room = rooms[roomId];
     if (!room) return;
 
-    if (room.creatorId !== socket.id) {
-      socket.emit("error_message", "Only creator can start game");
-      return;
-    }
-
-    if (room.players.length < room.maxPlayers) {
-      socket.emit("error_message", "Waiting for players");
-      return;
-    }
+    if (room.creatorId !== socket.id) return;
 
     room.started = true;
-
-    console.log(`Game started in room ${roomId}`);
 
     io.to(roomId).emit("game_started", {
       roomId,
@@ -167,9 +139,24 @@ io.on("connection", (socket) => {
     });
   });
 
-  /**
-   * DISCONNECT
-   */
+  /* ---------------- CREATOR LEAVES ROOM ---------------- */
+  socket.on("leave_room", ({ roomId }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.creatorId === socket.id) {
+      console.log("Room destroyed by creator:", roomId);
+
+      io.to(roomId).emit("room_destroyed", {
+        reason: "creator_left"
+      });
+
+      delete rooms[roomId];
+      emitRoomList();
+    }
+  });
+
+  /* ---------------- DISCONNECT ---------------- */
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
 
@@ -177,26 +164,38 @@ io.on("connection", (socket) => {
 
     for (const roomId in rooms) {
       const room = rooms[roomId];
-      const before = room.players.length;
 
-      room.players = room.players.filter(id => id !== socket.id);
+      // 🔴 Creator disconnect → destroy room
+      if (room.creatorId === socket.id) {
+        console.log("Room destroyed (creator disconnect):", roomId);
+
+        io.to(roomId).emit("room_destroyed", {
+          reason: "creator_disconnect"
+        });
+
+        delete rooms[roomId];
+        changed = true;
+        continue;
+      }
+
+      // 🔹 Normal player disconnect
+      const before = room.players.length;
+      room.players = room.players.filter(p => p !== socket.id);
 
       if (room.players.length !== before) {
+        io.to(roomId).emit("player_left", {
+          currentPlayers: room.players.length,
+          roomName: room.roomName
+        });
         changed = true;
       }
 
       if (room.players.length === 0) {
         delete rooms[roomId];
         changed = true;
-      } else {
-        io.to(roomId).emit("player_left", {
-          currentPlayers: room.players.length,
-          roomName: room.roomName
-        });
       }
     }
 
-    // 🔥 Update room list if anything changed
     if (changed) {
       emitRoomList();
     }
@@ -208,5 +207,5 @@ io.on("connection", (socket) => {
  */
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
