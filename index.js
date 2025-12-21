@@ -22,7 +22,7 @@ const io = new Server(server, {
  */
 const rooms = {};
 
-/* ---------- SEND ROOM LIST ---------- */
+/* ================= ROOM LIST ================= */
 function emitRoomList() {
   io.sockets.sockets.forEach(sock => {
     const list = Object.values(rooms)
@@ -39,36 +39,43 @@ function emitRoomList() {
   });
 }
 
-/* ---------- HEALTH ---------- */
-app.get("/", (_, res) =>
-  res.send("✅ Saap Sidi Socket Server Running")
-);
+/* ================= HEALTH ================= */
+app.get("/", (_, res) => {
+  res.send("✅ Saap Sidi Socket Server Running");
+});
 
-/* ---------- SOCKET ---------- */
+/* ================= SOCKET ================= */
 io.on("connection", socket => {
   console.log("🔗 Connected:", socket.id);
 
   /* ===== CREATE ROOM ===== */
   socket.on("create_room", ({ roomName, password, maxPlayers, playerName }) => {
 
-    if (![2,3,4].includes(maxPlayers)) {
+    if (![2, 3, 4].includes(maxPlayers)) {
       socket.emit("error_message", "Invalid player size");
       return;
     }
 
-    const roomId = Math.random().toString(36).substring(2,8).toUpperCase();
+    const roomId = Math.random()
+      .toString(36)
+      .substring(2, 8)
+      .toUpperCase();
 
     rooms[roomId] = {
       roomId,
-      roomName: roomName || "Room",
+      roomName: roomName?.trim() || "Room",
       creatorId: socket.id,
       maxPlayers,
       password: password?.length ? password : null,
       started: false,
-      players: [{ id: socket.id, name: playerName || "Player" }]
+      players: [
+        { id: socket.id, name: playerName || "Player" }
+      ]
     };
 
     socket.join(roomId);
+
+    console.log(`🟢 Room created: ${roomId}`);
 
     socket.emit("room_created", {
       roomId,
@@ -97,6 +104,7 @@ io.on("connection", socket => {
       return;
     }
 
+    // ❌ creator cannot re-join
     if (room.creatorId === socket.id) {
       socket.emit("join_failed", "Creator cannot join own room");
       return;
@@ -112,17 +120,22 @@ io.on("connection", socket => {
       return;
     }
 
-    room.players.push({ id: socket.id, name: playerName || "Player" });
+    room.players.push({
+      id: socket.id,
+      name: playerName || "Player"
+    });
+
     socket.join(roomId);
 
-    // ✅ PRIVATE EVENT → navigation
+    console.log(`👤 ${playerName} joined ${roomId}`);
+
+    // ✅ IMPORTANT SUCCESS EVENT
     socket.emit("join_success", {
-      roomId,
+      roomId: room.roomId,
       roomName: room.roomName,
       maxPlayers: room.maxPlayers
     });
 
-    // 🔄 UI update
     io.to(roomId).emit("player_list_update", {
       players: room.players,
       maxPlayers: room.maxPlayers
@@ -134,7 +147,21 @@ io.on("connection", socket => {
   /* ===== START GAME ===== */
   socket.on("start_game", ({ roomId }) => {
     const room = rooms[roomId];
-    if (!room || room.players.length < 2) return;
+    if (!room) return;
+
+    if (room.creatorId !== socket.id) {
+      socket.emit("error_message", "Only creator can start game");
+      return;
+    }
+
+    if (room.players.length < 2) {
+      socket.emit("error_message", "At least 2 players required");
+      return;
+    }
+
+    room.started = true;
+
+    console.log(`🎮 Game started: ${roomId}`);
 
     io.to(roomId).emit("game_started", {
       roomId,
@@ -156,26 +183,41 @@ io.on("connection", socket => {
 
   /* ===== DISCONNECT ===== */
   socket.on("disconnect", () => {
+    console.log("❌ Disconnected:", socket.id);
+
     for (const roomId in rooms) {
       const room = rooms[roomId];
 
+      // 🔴 creator left → destroy room
       if (room.creatorId === socket.id) {
         io.to(roomId).emit("room_destroyed");
         delete rooms[roomId];
         continue;
       }
 
+      // 🔹 normal player left
+      const before = room.players.length;
       room.players = room.players.filter(p => p.id !== socket.id);
 
-      io.to(roomId).emit("player_list_update", {
-        players: room.players,
-        maxPlayers: room.maxPlayers
-      });
+      if (room.players.length !== before) {
+        io.to(roomId).emit("player_list_update", {
+          players: room.players,
+          maxPlayers: room.maxPlayers
+        });
+      }
+
+      // 🧹 cleanup empty room
+      if (room.players.length === 0) {
+        delete rooms[roomId];
+      }
     }
+
     emitRoomList();
   });
 });
 
-server.listen(3000, () =>
-  console.log("🚀 Server running on port 3000")
+/* ================= START SERVER ================= */
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
 );
