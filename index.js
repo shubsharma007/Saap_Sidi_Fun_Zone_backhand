@@ -86,7 +86,8 @@ io.on("connection", (socket) => {
     socket.emit("room_created", {
       roomId,
       roomName: rooms[roomId].roomName,
-      maxPlayers
+      maxPlayers,
+      password
     });
 
     // send initial player list
