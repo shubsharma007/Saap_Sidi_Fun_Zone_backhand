@@ -10,36 +10,38 @@ const io = new Server(server, {
 });
 
 /**
- * rooms[roomId] = {
- *   roomId,
- *   roomName,
- *   creatorId,
- *   maxPlayers,
- *   password,
- *   started,
- *   players: [{ id, name }]
+ * rooms = {
+ *   roomId: {
+ *     roomId,
+ *     roomName,
+ *     creatorId,
+ *     maxPlayers,
+ *     password,
+ *     started,
+ *     players: [{ id, name }]
+ *   }
  * }
  */
 const rooms = {};
 
-/* ================= ROOM LIST ================= */
+/* ================= SEND ROOM LIST ================= */
 function emitRoomList() {
   io.sockets.sockets.forEach(sock => {
     const list = Object.values(rooms)
-      .filter(r => r.creatorId !== sock.id)
-      .map(r => ({
-        roomId: r.roomId,
-        roomName: r.roomName,
-        currentPlayers: r.players.length,
-        maxPlayers: r.maxPlayers,
-        hasPassword: r.password !== null
+      .filter(room => room.creatorId !== sock.id)
+      .map(room => ({
+        roomId: room.roomId,
+        roomName: room.roomName,
+        currentPlayers: room.players.length,
+        maxPlayers: room.maxPlayers,
+        hasPassword: room.password !== null
       }));
 
     sock.emit("room_list", list);
   });
 }
 
-/* ================= HEALTH ================= */
+/* ================= HEALTH CHECK ================= */
 app.get("/", (_, res) => {
   res.send("✅ Saap Sidi Socket Server Running");
 });
@@ -77,6 +79,7 @@ io.on("connection", socket => {
 
     console.log(`🟢 Room created: ${roomId}`);
 
+    // 🔹 Send room created to creator
     socket.emit("room_created", {
       roomId,
       roomName: rooms[roomId].roomName,
@@ -84,6 +87,7 @@ io.on("connection", socket => {
       password: password || ""
     });
 
+    // 🔹 Send initial player list
     io.to(roomId).emit("player_list_update", {
       players: rooms[roomId].players,
       maxPlayers
@@ -93,7 +97,9 @@ io.on("connection", socket => {
   });
 
   /* ===== GET ROOMS ===== */
-  socket.on("get_rooms", emitRoomList);
+  socket.on("get_rooms", () => {
+    emitRoomList();
+  });
 
   /* ===== JOIN ROOM ===== */
   socket.on("join_room", ({ roomId, password, playerName }) => {
@@ -104,7 +110,6 @@ io.on("connection", socket => {
       return;
     }
 
-    // ❌ creator cannot re-join
     if (room.creatorId === socket.id) {
       socket.emit("join_failed", "Creator cannot join own room");
       return;
@@ -127,15 +132,17 @@ io.on("connection", socket => {
 
     socket.join(roomId);
 
-    console.log(`👤 ${playerName} joined ${roomId}`);
+    console.log(`👤 ${playerName} joined room ${roomId}`);
 
-    // ✅ IMPORTANT SUCCESS EVENT
+    // ✅ JOIN SUCCESS (IMPORTANT FOR JOINER)
     socket.emit("join_success", {
       roomId: room.roomId,
       roomName: room.roomName,
-      maxPlayers: room.maxPlayers
+      maxPlayers: room.maxPlayers,
+      players: room.players
     });
 
+    // ✅ UPDATE EVERYONE
     io.to(roomId).emit("player_list_update", {
       players: room.players,
       maxPlayers: room.maxPlayers
@@ -175,6 +182,7 @@ io.on("connection", socket => {
     if (!room) return;
 
     if (room.creatorId === socket.id) {
+      console.log("🔴 Room destroyed by creator:", roomId);
       io.to(roomId).emit("room_destroyed");
       delete rooms[roomId];
       emitRoomList();
@@ -188,14 +196,14 @@ io.on("connection", socket => {
     for (const roomId in rooms) {
       const room = rooms[roomId];
 
-      // 🔴 creator left → destroy room
+      // 🔴 Creator disconnect → destroy room
       if (room.creatorId === socket.id) {
         io.to(roomId).emit("room_destroyed");
         delete rooms[roomId];
         continue;
       }
 
-      // 🔹 normal player left
+      // 🔹 Normal player disconnect
       const before = room.players.length;
       room.players = room.players.filter(p => p.id !== socket.id);
 
@@ -206,7 +214,6 @@ io.on("connection", socket => {
         });
       }
 
-      // 🧹 cleanup empty room
       if (room.players.length === 0) {
         delete rooms[roomId];
       }
@@ -218,6 +225,6 @@ io.on("connection", socket => {
 
 /* ================= START SERVER ================= */
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
