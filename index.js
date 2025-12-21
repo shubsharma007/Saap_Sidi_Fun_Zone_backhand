@@ -31,7 +31,8 @@ function emitRoomList() {
         roomName: room.roomName,
         currentPlayers: room.players.length,
         maxPlayers: room.maxPlayers,
-        hasPassword: room.password !== null
+        hasPassword: room.password !== null,
+        password: room.password
       }));
 
     sock.emit("room_list", list);
