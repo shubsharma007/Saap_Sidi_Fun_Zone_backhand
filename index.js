@@ -24,7 +24,7 @@ const io = new Server(server, {
  */
 const rooms = {};
 
-/* ================= SEND ROOM LIST ================= */
+/* ================= ROOM LIST ================= */
 function emitRoomList() {
   io.sockets.sockets.forEach(sock => {
     const list = Object.values(rooms)
@@ -41,11 +41,6 @@ function emitRoomList() {
   });
 }
 
-/* ================= HEALTH CHECK ================= */
-app.get("/", (_, res) => {
-  res.send("✅ Saap Sidi Socket Server Running");
-});
-
 /* ================= SOCKET ================= */
 io.on("connection", socket => {
   console.log("🔗 Connected:", socket.id);
@@ -58,10 +53,12 @@ io.on("connection", socket => {
       return;
     }
 
-    const roomId = Math.random()
-      .toString(36)
-      .substring(2, 8)
-      .toUpperCase();
+    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+    const creatorPlayer = {
+      id: socket.id,
+      name: playerName || "Player"
+    };
 
     rooms[roomId] = {
       roomId,
@@ -70,16 +67,14 @@ io.on("connection", socket => {
       maxPlayers,
       password: password?.length ? password : null,
       started: false,
-      players: [
-        { id: socket.id, name: playerName || "Player" }
-      ]
+      players: [creatorPlayer]
     };
 
     socket.join(roomId);
 
     console.log(`🟢 Room created: ${roomId}`);
 
-    // 🔹 Send room created to creator
+    // 🔹 Notify creator room created
     socket.emit("room_created", {
       roomId,
       roomName: rooms[roomId].roomName,
@@ -87,17 +82,20 @@ io.on("connection", socket => {
       password: password || ""
     });
 
-    // 🔹 Send initial player list
+    // 🔥 NEW: creator is also a joined player
+    io.to(roomId).emit("player_joined", {
+      roomId,
+      joinedPlayer: creatorPlayer,
+      players: rooms[roomId].players,
+      maxPlayers
+    });
+
+    // 🔹 Full list update
     io.to(roomId).emit("player_list_update", {
       players: rooms[roomId].players,
       maxPlayers
     });
 
-    emitRoomList();
-  });
-
-  /* ===== GET ROOMS ===== */
-  socket.on("get_rooms", () => {
     emitRoomList();
   });
 
@@ -125,24 +123,33 @@ io.on("connection", socket => {
       return;
     }
 
-    room.players.push({
+    const newPlayer = {
       id: socket.id,
       name: playerName || "Player"
-    });
+    };
 
+    room.players.push(newPlayer);
     socket.join(roomId);
 
-    console.log(`👤 ${playerName} joined room ${roomId}`);
+    console.log(`👤 ${newPlayer.name} joined room ${roomId}`);
 
-    // ✅ JOIN SUCCESS (IMPORTANT FOR JOINER)
+    // 🔥 MAIN EVENT: notify ALL users in room
+    io.to(roomId).emit("player_joined", {
+      roomId,
+      joinedPlayer: newPlayer,
+      players: room.players,
+      maxPlayers: room.maxPlayers
+    });
+
+    // 🔹 Success only for joiner
     socket.emit("join_success", {
-      roomId: room.roomId,
+      roomId,
       roomName: room.roomName,
       maxPlayers: room.maxPlayers,
       players: room.players
     });
 
-    // ✅ UPDATE EVERYONE
+    // 🔹 Sync list
     io.to(roomId).emit("player_list_update", {
       players: room.players,
       maxPlayers: room.maxPlayers
@@ -168,8 +175,6 @@ io.on("connection", socket => {
 
     room.started = true;
 
-    console.log(`🎮 Game started: ${roomId}`);
-
     io.to(roomId).emit("game_started", {
       roomId,
       players: room.players
@@ -182,7 +187,6 @@ io.on("connection", socket => {
     if (!room) return;
 
     if (room.creatorId === socket.id) {
-      console.log("🔴 Room destroyed by creator:", roomId);
       io.to(roomId).emit("room_destroyed");
       delete rooms[roomId];
       emitRoomList();
@@ -191,19 +195,15 @@ io.on("connection", socket => {
 
   /* ===== DISCONNECT ===== */
   socket.on("disconnect", () => {
-    console.log("❌ Disconnected:", socket.id);
-
     for (const roomId in rooms) {
       const room = rooms[roomId];
 
-      // 🔴 Creator disconnect → destroy room
       if (room.creatorId === socket.id) {
         io.to(roomId).emit("room_destroyed");
         delete rooms[roomId];
         continue;
       }
 
-      // 🔹 Normal player disconnect
       const before = room.players.length;
       room.players = room.players.filter(p => p.id !== socket.id);
 
@@ -218,13 +218,11 @@ io.on("connection", socket => {
         delete rooms[roomId];
       }
     }
-
     emitRoomList();
   });
 });
 
 /* ================= START SERVER ================= */
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+server.listen(3000, () =>
+  console.log("🚀 Server running on port 3000")
+);
