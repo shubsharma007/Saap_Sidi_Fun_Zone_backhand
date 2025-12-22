@@ -157,6 +157,12 @@ io.on("connection", socket => {
 
     emitRoomList();
   });
+  /* ===== GET ROOMS (MISSING FIX) ===== */
+socket.on("get_rooms", () => {
+  console.log("📤 get_rooms called by", socket.id);
+  emitRoomList();
+});
+
   /* ===== REQUEST PLAYER LIST (NEW) ===== */
   socket.on("request_player_list", ({ roomId }) => {
 
