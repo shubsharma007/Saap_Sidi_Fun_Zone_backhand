@@ -157,6 +157,24 @@ io.on("connection", socket => {
 
     emitRoomList();
   });
+  /* ===== REQUEST PLAYER LIST (NEW) ===== */
+  socket.on("request_player_list", ({ roomId }) => {
+
+    const room = rooms[roomId];
+
+    if (!room) {
+      socket.emit("error_message", "Room not found");
+      return;
+    }
+
+    console.log(`📤 Player list requested for room ${roomId}`);
+
+    // 🔥 SAME EVENT, SAME FORMAT (NO ANDROID CHANGE)
+    socket.emit("player_list_update", {
+      players: room.players,
+      maxPlayers: room.maxPlayers
+    });
+  });
 
   /* ===== START GAME ===== */
   socket.on("start_game", ({ roomId }) => {
