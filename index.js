@@ -233,23 +233,31 @@ io.on("connection", socket => {
 
 
   /* 🧩 MOVE COMPLETE */
-  socket.on("move_complete", ({ roomId, newPos }) => {
+ socket.on("move_complete", ({ roomId, playerIndex, newPos }) => {
 
-    const room = rooms[roomId];
-    if (!room) return;
+  const room = rooms[roomId];
+  if (!room) return;
 
+  // ❗ only accept move from current turn player
+  if (playerIndex !== room.turnIndex) {
+    console.log("❌ Rejected move_complete from wrong player");
+    return;
+  }
 
-    room.players[room.turnIndex].pos = newPos;
+  room.players[playerIndex].pos = newPos;
 
-    room.turnIndex =
-      (room.turnIndex + 1) % room.players.length;
+  room.turnIndex =
+    (room.turnIndex + 1) % room.players.length;
 
+  io.to(roomId).emit("turn_changed", {
+    turnIndex: room.turnIndex,
+    players: room.players
+  });
 
-    io.to(roomId).emit("turn_changed", {
-      turnIndex: room.turnIndex,
-      players: room.players
-    });
-
+  io.to(roomId).emit("sync_positions", {
+    positions: room.players.map(p => p.pos)
+  });
+});
 
     /* 🔥 SYNC POSITIONS TO ALL */
     io.to(roomId).emit("sync_positions", {
