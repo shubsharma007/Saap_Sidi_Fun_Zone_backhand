@@ -94,6 +94,11 @@ io.on("connection", socket => {
       players: rooms[roomId].players,
       maxPlayers
     });
+    // 👇 creator always index 0
+   socket.emit("your_index", {
+     roomId,
+     index: 0
+   });
 
     io.to(roomId).emit("player_list_update", {
       players: rooms[roomId].players,
@@ -138,7 +143,11 @@ io.on("connection", socket => {
       players: room.players,
       maxPlayers: room.maxPlayers
     });
-
+ // 👇 send exact index to joining player
+   socket.emit("your_index", {
+     roomId,
+     index: room.players.findIndex(p => p.id === socket.id)
+   });
     socket.emit("join_success", {
       roomId,
       roomName: room.roomName,
