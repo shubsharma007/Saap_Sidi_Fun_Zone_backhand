@@ -257,7 +257,6 @@ io.on("connection", socket => {
   io.to(roomId).emit("sync_positions", {
     positions: room.players.map(p => p.pos)
   });
-});
 
     /* 🔥 SYNC POSITIONS TO ALL */
     io.to(roomId).emit("sync_positions", {
