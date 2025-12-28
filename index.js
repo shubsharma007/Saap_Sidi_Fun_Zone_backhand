@@ -65,15 +65,7 @@ io.on("connection", socket => {
       name: playerName || "Player",
       pos: 0
     };
-  // ⭐ FIX — creator decides board
-  const boardList =
-    level === "hard" ? boards.hard :
-    level === "hardest" ? boards.hardest :
-    boards.easy;
-
-  const boardIndex = Math.floor(Math.random() * boardList.length);
-  const boardSetup = boardList[boardIndex];
-
+  
     rooms[roomId] = {
       roomId,
       roomName: roomName?.trim() || "Room",
@@ -84,8 +76,6 @@ io.on("connection", socket => {
       turnIndex: 0, // 👈 IMPORTANT
       level: level || "easy",   // ⭐ NEW
       boardIndex,        // ⭐ same board for all
-      snakes: boardSetup.snakes,
-      ladders: boardSetup.ladders,
       players: [creatorPlayer]
     };
 
