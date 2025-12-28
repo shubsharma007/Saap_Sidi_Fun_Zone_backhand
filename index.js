@@ -51,7 +51,7 @@ io.on("connection", socket => {
 
 
   /* ========== CREATE ROOM ========== */
-  socket.on("create_room", ({ roomName, password, maxPlayers, playerName }) => {
+  socket.on("create_room", ({ roomName, password, maxPlayers, playerName, level}) => {
 
     if (![2, 3, 4].includes(maxPlayers)) {
       socket.emit("error_message", "Invalid player size");
@@ -73,7 +73,8 @@ io.on("connection", socket => {
       maxPlayers,
       password: password?.length ? password : null,
       started: false,
-      turnIndex: 0,        // 👈 IMPORTANT
+      turnIndex: 0, // 👈 IMPORTANT
+       level: level || "easy",   // ⭐ NEW
       players: [creatorPlayer]
     };
 
@@ -85,7 +86,8 @@ io.on("connection", socket => {
       roomId,
       roomName: rooms[roomId].roomName,
       maxPlayers,
-      password: password || ""
+      password: password || "",
+      level: rooms[roomId].level   // ⭐ NEW
     });
 
     io.to(roomId).emit("player_joined", {
@@ -204,7 +206,8 @@ io.on("connection", socket => {
     io.to(roomId).emit("game_started", {
       roomId,
       players: room.players,
-      turnIndex: room.turnIndex
+      turnIndex: room.turnIndex,
+      level: room.level    // ⭐ NEW
     });
   });
 
