@@ -277,6 +277,23 @@ socket.on("move_complete", ({ roomId, playerIndex, newPos }) => {
 
   room.players[playerIndex].pos = newPos;
 
+    /* 🏆 WIN CHECK */
+  if (newPos === 100) {
+
+    const winner = room.players[playerIndex];
+
+    io.to(roomId).emit("game_finished", {
+      roomId,
+      winner,
+      ranking: room.players   // send order list
+    });
+
+    // ❌ auto destroy room after finish
+    delete rooms[roomId];
+    emitRoomList();
+    return;
+  }
+  
   // next turn
   room.turnIndex =
     (room.turnIndex + 1) % room.players.length;
