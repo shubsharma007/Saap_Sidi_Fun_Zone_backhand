@@ -65,6 +65,14 @@ io.on("connection", socket => {
       name: playerName || "Player",
       pos: 0
     };
+  // ⭐ FIX — creator decides board
+  const boardList =
+    level === "hard" ? boards.hard :
+    level === "hardest" ? boards.hardest :
+    boards.easy;
+
+  const boardIndex = Math.floor(Math.random() * boardList.length);
+  const boardSetup = boardList[boardIndex];
 
     rooms[roomId] = {
       roomId,
@@ -74,7 +82,10 @@ io.on("connection", socket => {
       password: password?.length ? password : null,
       started: false,
       turnIndex: 0, // 👈 IMPORTANT
-       level: level || "easy",   // ⭐ NEW
+      level: level || "easy",   // ⭐ NEW
+      boardIndex,        // ⭐ same board for all
+      snakes: boardSetup.snakes,
+      ladders: boardSetup.ladders,
       players: [creatorPlayer]
     };
 
@@ -87,7 +98,8 @@ io.on("connection", socket => {
       roomName: rooms[roomId].roomName,
       maxPlayers,
       password: password || "",
-      level: rooms[roomId].level   // ⭐ NEW
+      level: rooms[roomId].level,   // ⭐ NEW
+       boardIndex        // ⭐ IMPORTANT
     });
 
     io.to(roomId).emit("player_joined", {
@@ -154,7 +166,9 @@ io.on("connection", socket => {
       roomId,
       roomName: room.roomName,
       maxPlayers: room.maxPlayers,
-      players: room.players
+      players: room.players,
+      level: room.level,
+      boardIndex: room.boardIndex     // ⭐ send same board
     });
 
     io.to(roomId).emit("player_list_update", {
@@ -207,7 +221,8 @@ io.on("connection", socket => {
       roomId,
       players: room.players,
       turnIndex: room.turnIndex,
-      level: room.level    // ⭐ NEW
+      level: room.level,    // ⭐ NEW
+      boardIndex: room.boardIndex   // ⭐ same for everyone
     });
   });
 
