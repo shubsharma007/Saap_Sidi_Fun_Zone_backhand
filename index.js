@@ -51,7 +51,7 @@ io.on("connection", socket => {
 
 
   /* ========== CREATE ROOM ========== */
-  socket.on("create_room", ({ roomName, password, maxPlayers, playerName, level}) => {
+  socket.on("create_room", ({ roomName, password, maxPlayers, playerName, level,boardIndex}) => {
 
     if (![2, 3, 4].includes(maxPlayers)) {
       socket.emit("error_message", "Invalid player size");
@@ -241,19 +241,43 @@ io.on("connection", socket => {
 
 
   /* 🧩 MOVE COMPLETE */
- socket.on("move_complete", ({ roomId, playerIndex, newPos }) => {
+ // socket.on("move_complete", ({ roomId, playerIndex, newPos }) => {
+
+ //  const room = rooms[roomId];
+ //  if (!room) return;
+
+ //  // ❗ only accept move from current turn player
+ //  if (playerIndex !== room.turnIndex) {
+ //    console.log("❌ Rejected move_complete from wrong player");
+ //    return;
+ //  }
+
+ //  room.players[playerIndex].pos = newPos;
+
+ //  room.turnIndex =
+ //    (room.turnIndex + 1) % room.players.length;
+
+ //  io.to(roomId).emit("turn_changed", {
+ //    turnIndex: room.turnIndex,
+ //    players: room.players
+ //  });
+
+ //    /* 🔥 SYNC POSITIONS TO ALL */
+ //    io.to(roomId).emit("sync_positions", {
+ //      positions: room.players.map(p => p.pos)
+ //    });
+ //  });
+socket.on("move_complete", ({ roomId, playerIndex, newPos }) => {
 
   const room = rooms[roomId];
   if (!room) return;
 
-  // ❗ only accept move from current turn player
-  if (playerIndex !== room.turnIndex) {
-    console.log("❌ Rejected move_complete from wrong player");
-    return;
-  }
+  // accept only current player's move
+  if (playerIndex !== room.turnIndex) return;
 
   room.players[playerIndex].pos = newPos;
 
+  // next turn
   room.turnIndex =
     (room.turnIndex + 1) % room.players.length;
 
@@ -262,15 +286,12 @@ io.on("connection", socket => {
     players: room.players
   });
 
+  // sync final positions
   io.to(roomId).emit("sync_positions", {
     positions: room.players.map(p => p.pos)
   });
 
-    /* 🔥 SYNC POSITIONS TO ALL */
-    io.to(roomId).emit("sync_positions", {
-      positions: room.players.map(p => p.pos)
-    });
-  });
+});
 
 
 
